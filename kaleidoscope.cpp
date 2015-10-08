@@ -1,5 +1,10 @@
 /*****************************************************************************/
-/** Kaleido scope for AviUtl  ver 0.01
+/** Kaleido scope for AviUtl  ver 0.02
+ *
+ * 2009-06-21 (ver 0.01)
+ *   èâî≈åˆäJ
+ * 2010-09-12 (var 0.02)
+ *   å≈íËè¨êîââéZÇ…ÇµÇƒçÇë¨âª
  */
 #define _USE_MATH_DEFINES
 #include <cmath>
@@ -16,7 +21,7 @@
 /** FILTER_DLL structure
  */
 char filtername[] = "KaleidoScope";
-char filterinfo[] = "KaleidoScope for AviUtl ver 0.01 by MakKi";
+char filterinfo[] = "KaleidoScope for AviUtl ver 0.02 by MakKi";
 
 #define track_N 4
 TCHAR *track_name[] = { "x", "y", "size", "angle" };
@@ -73,100 +78,120 @@ EXTERN_C FILTER_DLL __declspec(dllexport) * __stdcall GetFilterTable( void )
 
 class CoordCalc {
 public:
-	typedef std::pair<double,double> Coord;
+	typedef std::pair<int,int> Coord;
+	enum{
+		FIXED_POINT = 12,
+		FIXED_NUM = 1 << FIXED_POINT,
+	};
+
+	// êÆêîïîÅAè¨êîïîÇéÊÇËèoÇ∑.
+	// -2.5 = -3 + 0.5
+	static int integer_part(int x){
+		return x & ~(FIXED_NUM-1);
+	}
+	static int flaction_part(int x){
+		return x - integer_part(x);
+	}
 
 protected:
-	double ox,oy;
-	double unit;
+	int ox,oy;
+	int unit;
 
-	double sin_th;
-	double cos_th;
+	int sin_th;
+	int cos_th;
 
-	double c_xtow, c_ytow;
-	double c_xtoz, c_ytoz;
-	double c_wtox, c_wtoy;
-	double c_ztox, c_ztoy;
+	int c_xtow, c_ytow;
+	int c_xtoz, c_ytoz;
+	int c_wtox, c_wtoy;
+	int c_ztox, c_ztoy;
 
 	int mod3(int x){
 		return (x>=0)? x%3: (3+(x%3))%3;
 	}
 
-	static Coord ref_A(double w,double z){
-		return (w+z<=1)? Coord(w,z): Coord(1.0-z,1.0-w);
+	static Coord ref_A(int w,int z){
+		return (w+z<=FIXED_NUM)? Coord(w,z): Coord(FIXED_NUM-z,FIXED_NUM-w);
 	}
-	static Coord ref_B(double w,double z){
-		return (w+z<=1)? Coord(1.0-w-z,w): Coord(w+z-1.0,1.0-z);
+	static Coord ref_B(int w,int z){
+		return (w+z<=FIXED_NUM)? Coord(FIXED_NUM-w-z,w): Coord(w+z-FIXED_NUM,FIXED_NUM-z);
 	}
-	static Coord ref_C(double w,double z){
-		return (w+z<=1)? Coord(z,1.0-w-z): Coord(1.0-w,z+w-1.0);
+	static Coord ref_C(int w,int z){
+		return (w+z<=FIXED_NUM)? Coord(z,FIXED_NUM-w-z): Coord(FIXED_NUM-w,z+w-FIXED_NUM);
 	}
 
-	static Coord (*ref[3][3])(double w,double z);
+	static Coord (*ref[3][3])(int w,int z);
 
 public:
-	CoordCalc(double x,double y,double l,double th){
+	CoordCalc(int x,int y,int l,double th){
 		ox = x;
 		oy = y;
 		unit = l;
 
 		double sin_th = sin(th);
 		double cos_th = cos(th);
-		double root3 = sqrt(3.0);
+		const static double root3 = sqrt(3.0);
 
-		c_xtow = cos_th + sin_th/root3;
-		c_ytow = sin_th - cos_th/root3;
-		c_xtoz = -2.0 * sin_th / root3;
-		c_ytoz = 2.0 * cos_th / root3;
+		c_xtow = cos_th*FIXED_NUM + (sin_th*FIXED_NUM +root3/2)/root3;
+		c_ytow = sin_th*FIXED_NUM - (cos_th*FIXED_NUM +root3/2)/root3;
+		c_xtoz = (-2.0 * sin_th * FIXED_NUM +root3/2)/root3;
+		c_ytoz = ( 2.0 * cos_th * FIXED_NUM +root3/2)/root3;
 
-		c_wtox = cos_th;
-		c_ztox = (cos_th - root3*sin_th)/2;
-		c_wtoy = sin_th;
-		c_ztoy = (sin_th + root3*cos_th)/2;
+		c_wtox = cos_th * FIXED_NUM;
+		c_ztox = ((cos_th - root3*sin_th)*FIXED_NUM +1)/2;
+		c_wtoy = sin_th * FIXED_NUM;
+		c_ztoy = ((sin_th + root3*cos_th)*FIXED_NUM +1)/2;
 	}
 
-	Coord operator() (double x,double y){
+	Coord operator() (int x,int y){
 		x -= ox;
 		y -= oy;
 
 		// ç¿ïWïœä∑ (íºå->éOäp)
-		double w = (c_xtow * x + c_ytow * y) /unit;
-		double z = (c_xtoz * x + c_ytoz * y) /unit;
+		// w,zÇÕå≈íËè¨êîÅiFIXED_NUMî{Ç≥ÇÍÇƒÇÈÅj
+		int w = (c_xtow * x + c_ytow * y +unit/2) /unit;
+		int z = (c_xtoz * x + c_ytoz * y +unit/2) /unit;
 
 		// éQè∆ç¿ïW
-		double fw = floor(w);
-		double fz = floor(z);
-		Coord r = ref[mod3((int)fz)][mod3((int)fw)](w-fw,z-fz);
-		w = r.first * unit;
-		z = r.second * unit;
+		int fw = integer_part(w);
+		int fz = integer_part(z);
+		Coord r = ref[mod3(fz)][mod3(fw)](flaction_part(w),flaction_part(z));
+		__int64 ww = r.first * unit; // åÖÇ†Ç”ÇÍñhé~ÇÃÇΩÇﬂ64bit
+		__int64 zz = r.second * unit;
 
 		// ç¿ïWïœä∑ (éOäp->íºå)
-		r.first  = c_wtox * w + c_ztox * z + ox;
-		r.second = c_wtoy * w + c_ztoy * z + oy;
+		r.first  = (c_wtox * ww + c_ztox * zz + FIXED_NUM/2)/FIXED_NUM + ox *FIXED_NUM;
+		r.second = (c_wtoy * ww + c_ztoy * zz + FIXED_NUM/2)/FIXED_NUM + oy *FIXED_NUM;
 
 		return r;
 	}
 };
 
-CoordCalc::Coord (*CoordCalc::ref[3][3])(double w,double z) = {
+CoordCalc::Coord (*CoordCalc::ref[3][3])(int w,int z) = {
 	{ref_A, ref_B, ref_C}, {ref_C, ref_A, ref_B}, {ref_B, ref_C, ref_A}
 };
 
 
 /*---------------------------------------------------------------------------*/
 class Adjust {
-	double x,x_,y,y_;
+	int x,x_,y,y_;
 public:
-	Adjust(double xx,double yy){
-		x = xx;
-		x_ = 1.0 - xx;
-		y = yy;
-		y_ = 1.0 - yy;
+	Adjust(const CoordCalc::Coord &ref){
+		x = CoordCalc::flaction_part(ref.first);
+		x_ = CoordCalc::FIXED_NUM - x;
+		y = CoordCalc::flaction_part(ref.second);
+		y_ = CoordCalc::FIXED_NUM - y;
 	}
-	int operator()(double a,double b,double c,double d){
-		return static_cast<int>(a*x_*y_ + b*x*y_ + c*x_*y + d*x*y);
+	int operator()(int a,int b,int c,int d){
+		const static int harf = CoordCalc::FIXED_NUM/2;
+
+		// åÖÇ†Ç”ÇÍÇµÇ»Ç¢ÇÊÇ§Ç…ñàâÒäÑÇÈ
+		return (( (a*x_ +harf)>>CoordCalc::FIXED_POINT) * y_
+				+((b*x  +harf)>>CoordCalc::FIXED_POINT) * y_
+				+((c*x_ +harf)>>CoordCalc::FIXED_POINT) * y
+				+((d*x  +harf)>>CoordCalc::FIXED_POINT) * y
+				+ harf)>>CoordCalc::FIXED_POINT;
 	}
 };
-
 
 /*---------------------------------------------------------------------------*/
 inline void plot(PIXEL_YC *ycp,int w,int h,int x,int y)
@@ -254,15 +279,16 @@ BOOL func_proc(FILTER *fp,FILTER_PROC_INFO *fpip)
 		for(int w=0;w<fpip->w;++w){
 			CoordCalc::Coord ref = cc(w,h);
 
-			int ww = static_cast<int>(floor(ref.first));
-			int hh = static_cast<int>(floor(ref.second));
+			// å≈íËè¨êîÅ®êÆêî
+			int ww = ref.first >> CoordCalc::FIXED_POINT;
+			int hh = ref.second >> CoordCalc::FIXED_POINT;
 
 			if( ww<0 || ww>fpip->w-1 || hh<0 || hh>fpip->h-1){
 				dst->y = dst->cb = dst->cr = 0;
 			}
 			else{
-				PIXEL_YC *src = fpip->ycp_edit + (int)ww + (int)hh * pitch;
-				Adjust adjust(ref.first-ww, ref.second-hh);
+				PIXEL_YC *src = fpip->ycp_edit + ww + hh * pitch;
+				Adjust adjust(ref);
 				dst->y =  adjust(src->y, (src+1)->y, (src+pitch)->y, (src+pitch+1)->y);
 				dst->cb = adjust(src->cb,(src+1)->cb,(src+pitch)->cb,(src+pitch+1)->cb);
 				dst->cr = adjust(src->cr,(src+1)->cr,(src+pitch)->cr,(src+pitch+1)->cr);
